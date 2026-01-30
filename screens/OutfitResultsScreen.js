@@ -1,10 +1,10 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 
-export default function WardrobeScreen() {
+export default function OutfitResultsScreen() {
   return (
     <View>
-      <Text>Wardrobe Screen</Text>
+      <Text>Outfit Results Screen</Text>
     </View>
   );
 }

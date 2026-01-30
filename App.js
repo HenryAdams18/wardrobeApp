@@ -1,29 +1,21 @@
-import * as React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+
+import HomeScreen from './screens/HomeScreen';
 import WardrobeScreen from './screens/WardrobeScreen';
-import AddItemScreen from './screens/AddItemScreen';
-import OutfitScreen from './screens/OutfitScreen';
+import OutfitResultsScreen from './screens/OutfitResultsScreen';
 
-
-//Stack Navigator
-const Stack = createNativeStackNavigator();
+const Tab = createBottomTabNavigator();
 
 export default function App() {
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName="Wardrobe">
-        <Stack.Screen name="Wardrobe" component={WardrobeScreen} />
-        <Stack.Screen name="Add Item" component={AddItemScreen} />
-        <Stack.Screen name="Outfit" component={OutfitScreen} />
-      </Stack.Navigator>
+      <Tab.Navigator screenOptions={{ headerShown: false }}>
+        <Tab.Screen name="Home" component={HomeScreen} />
+        <Tab.Screen name="Wardrobe" component={WardrobeScreen} />
+        <Tab.Screen name="Outfits" component={OutfitResultsScreen} />
+      </Tab.Navigator>
     </NavigationContainer>
   );
 }
-
-//Styles
-const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  text: { fontSize: 24 },
-});
