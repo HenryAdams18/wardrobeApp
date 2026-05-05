@@ -28,7 +28,16 @@ export default function SavedOutfitsScreen() {
                     </>
                 )}
                 <ImagePart item={item.shoes} />
+                {item.outerwear && <ImagePart item={item.outerwear} />}
             </View>
+            {item.accessories && item.accessories.length > 0 && (
+                <View style={styles.accessoriesRow}>
+                    <Text style={styles.accLabel}>+ Accessories:</Text>
+                    {item.accessories.map((acc, index) => (
+                        <ImagePart key={index} item={acc} small />
+                    ))}
+                </View>
+            )}
             <View style={styles.cardFooter}>
                 <Text style={styles.dateText}>
                     {new Date(item.generatedAt).toLocaleDateString()}
@@ -40,12 +49,12 @@ export default function SavedOutfitsScreen() {
         </View>
     );
 
-    const ImagePart = ({ item }) => {
+    const ImagePart = ({ item, small }) => {
         if (!item) return null;
         return (
-            <View style={styles.imageContainer}>
-                {item.imageUri ? (
-                    <Image source={{ uri: item.imageUri }} style={styles.image} />
+            <View style={[styles.imageContainer, small && styles.imageContainerSmall]}>
+                {item.image || item.imageUri ? (
+                    <Image source={item.image || { uri: item.imageUri }} style={styles.image} />
                 ) : (
                     <View style={styles.placeholder} />
                 )}
@@ -114,6 +123,24 @@ const styles = StyleSheet.create({
         borderRadius: 8,
         overflow: 'hidden',
         backgroundColor: '#eee',
+    },
+    imageContainerSmall: {
+        flex: 0,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+    },
+    accessoriesRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+        gap: 6,
+    },
+    accLabel: {
+        fontSize: 11,
+        color: '#999',
+        fontWeight: 'bold',
+        marginRight: 4,
     },
     image: {
         width: '100%',

@@ -55,12 +55,13 @@ export default function WardrobeScreen() {
   const renderItem = ({ item }) => (
     <TouchableOpacity
       style={styles.card}
+      onPress={() => navigation.navigate('AddItem', { item })}
       onLongPress={() => confirmDelete(item.id)}
       delayLongPress={500}
     >
       <View style={styles.imagePlaceholder}>
-        {item.imageUri ? (
-          <Image source={{ uri: item.imageUri }} style={styles.itemImage} />
+        {item.image || item.imageUri ? (
+          <Image source={item.image || { uri: item.imageUri }} style={styles.itemImage} />
         ) : (
           <Text style={styles.imageText}>No Image</Text>
         )}
@@ -80,7 +81,7 @@ export default function WardrobeScreen() {
 
         {/* Filters */}
         <View style={styles.filterRow}>
-          {['All', 'Top', 'Bottom', 'Shoes', 'Outerwear', 'Full Body'].map(category => (
+          {['All', 'Top', 'Bottom', 'Shoes', 'Outerwear', 'Full Body', 'Accessory'].map(category => (
             <TouchableOpacity
               key={category}
               style={[
@@ -97,7 +98,7 @@ export default function WardrobeScreen() {
         {/* Wardrobe Grid */}
         <FlatList
           data={filteredItems}
-          keyExtractor={item => item.id}
+          keyExtractor={(item, index) => item.id + '-' + index}
           renderItem={renderItem}
           numColumns={2}
           columnWrapperStyle={styles.row}

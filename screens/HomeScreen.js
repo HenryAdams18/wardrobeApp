@@ -9,6 +9,8 @@ export default function HomeScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
 
+  const { preferences } = useContext(WardrobeContext);
+
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -62,6 +64,11 @@ export default function HomeScreen({ navigation }) {
           <>
             <Text style={styles.temp}>{Math.round(weather.temperature)}°C</Text>
             <Text style={styles.condition}>{getSuggestion(weather.temperature)}</Text>
+            {preferences?.rainReminder &&
+              ((weather.weatherCode >= 51 && weather.weatherCode <= 67) ||
+                (weather.weatherCode >= 71 && weather.weatherCode <= 77)) && (
+                <Text style={styles.rainWarning}>☂️ Rain forecast — don't forget an umbrella</Text>
+              )}
           </>
         ) : null}
       </View>
@@ -141,6 +148,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#ddd',
     marginTop: 8,
+  },
+  rainWarning: {
+    fontSize: 14,
+    color: '#8be9fd', // Soft blue for rain alert
+    marginTop: 12,
+    fontWeight: 'bold',
   },
   weatherError: {
     color: '#ffa5a5',

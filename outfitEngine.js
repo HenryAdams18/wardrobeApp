@@ -57,7 +57,7 @@ function wheelDistance(pos1, pos2) {
  * Score the colour harmony of an outfit's items.
  * Returns a value between 0 and 10.
  */
-function scoreColourHarmony(items) {
+function scoreColourHarmony(items, preferences = {}) {
     const colours = items.map(item => item.colour).filter(Boolean);
 
     // If no colours tagged, return a neutral score (don't penalise legacy items)
@@ -67,13 +67,21 @@ function scoreColourHarmony(items) {
     const uniqueNonNeutrals = [...new Set(nonNeutrals)];
 
     // Bonus: all-neutral outfit is always safe
-    if (uniqueNonNeutrals.length === 0) return 8;
+    if (uniqueNonNeutrals.length === 0) {
+        return preferences.preferMonochrome ? 10 : 8;
+    }
 
     let score = 6; // Base score
 
     // Three-colour rule: penalise more than 3 distinct non-neutral colours
     if (uniqueNonNeutrals.length > 3) {
-        score -= (uniqueNonNeutrals.length - 3) * 2;
+        if (preferences.preferColourful) {
+            score += 2; // Bonus for vibrant looks
+        } else {
+            score -= (uniqueNonNeutrals.length - 3) * 2;
+        }
+    } else if (preferences.preferMonochrome && uniqueNonNeutrals.length > 1) {
+        score -= (uniqueNonNeutrals.length - 1) * 2; // Penalise multi-coloured looks
     }
 
     // Check harmony between non-neutral colour pairs
@@ -108,7 +116,61 @@ function scoreColourHarmony(items) {
         score += 2;
     }
 
+    const profile = preferences?.styleProfile;
+    if (profile?.colourPalette === 'bold-colourful' && uniqueNonNeutrals.length >= 3) {
+        score += 2; // bonus instead of penalty
+    } else if (profile?.colourPalette === 'monochromatic' && uniqueNonNeutrals.length <= 1) {
+        score += 2;
+    } else if (profile?.colourPalette === 'earth-tones') {
+        const earthTones = ['Brown', 'Beige', 'Burgundy', 'Olive', 'Cream'];
+        const earthCount = colours.filter(c => earthTones.includes(c)).length;
+        if (earthCount >= 2) score += 1;
+    } else if (profile?.colourPalette === 'neutral' && uniqueNonNeutrals.length === 0) {
+        score = 10; // boost all-neutral from 8 to 10
+    }
+
     return Math.max(0, Math.min(10, score));
+}
+
+function scoreAccessoryColourMatch(accessory, outfitItems) {
+    if (!accessory.colour) return 5; // No colour tagged, neutral score
+
+    const outfitColours = outfitItems.map(item => item.colour).filter(Boolean);
+    const accessoryColour = accessory.colour;
+
+    // Neutral accessories always work
+    if (isNeutral(accessoryColour)) return 9;
+
+    // Check if accessory colour already exists in outfit (monochromatic match)
+    if (outfitColours.includes(accessoryColour)) return 8;
+
+    // Count non-neutral colours in outfit
+    const outfitNonNeutrals = [...new Set(outfitColours.filter(c => !isNeutral(c)))];
+
+    // If adding this accessory would exceed 3 non-neutral colours, penalise
+    const allNonNeutrals = [...new Set([...outfitNonNeutrals, accessoryColour].filter(c => !isNeutral(c)))];
+    if (allNonNeutrals.length > 3) return 2;
+
+    // Check colour wheel harmony with outfit's non-neutral colours
+    const accessoryPos = getWheelPosition(accessoryColour);
+    if (accessoryPos === null) return 5;
+
+    let harmonyTotal = 0;
+    let pairCount = 0;
+    for (const outfitColour of outfitNonNeutrals) {
+        const outfitPos = getWheelPosition(outfitColour);
+        if (outfitPos === null) continue;
+        const dist = wheelDistance(accessoryPos, outfitPos);
+        pairCount++;
+        if (dist === 0) harmonyTotal += 3;      // Same colour family
+        else if (dist <= 2) harmonyTotal += 2;   // Analogous
+        else if (dist >= 5 && dist <= 7) harmonyTotal += 1; // Complementary
+        else harmonyTotal -= 1;                   // Awkward
+    }
+
+    if (pairCount === 0) return 7; // No non-neutrals to compare against
+    const avgHarmony = harmonyTotal / pairCount;
+    return Math.max(0, Math.min(10, 6 + avgHarmony));
 }
 
 
@@ -131,7 +193,7 @@ const FORMALITY_VALUES = {
  * Score formality consistency across outfit items.
  * Returns a value between 0 and 10.
  */
-function scoreFormalityMatch(items) {
+function scoreFormalityMatch(items, preferences = {}) {
     const formalityLevels = items
         .map(item => FORMALITY_VALUES[item.formality])
         .filter(v => v !== undefined);
@@ -143,8 +205,20 @@ function scoreFormalityMatch(items) {
     const minLevel = Math.min(...formalityLevels);
     const range = maxLevel - minLevel;
 
-    if (range === 0) return 10;   // Perfect match — all same level
-    if (range === 1) return 7;    // Adjacent levels — acceptable mix
+    if (range === 0) {
+        return 10;   // Perfect match — all same level
+    }
+
+    if (range === 1) {
+        if (preferences.preferCasualStyle && ((minLevel === 1 && maxLevel === 2) || (minLevel === 2 && maxLevel === 1))) {
+            return 8; // Relaxed penalty for Casual/Everyday mix
+        }
+        if (preferences.preferSmartStyle && ((minLevel === 2 && maxLevel === 3) || (minLevel === 3 && maxLevel === 2))) {
+            return 8; // Relaxed penalty for Smart/Everyday mix
+        }
+        return 7;    // Adjacent levels — acceptable mix
+    }
+
     if (maxLevel === 99) return 0; // Athletic mixed with non-athletic is hard clash
     return 2;                      // Non-adjacent — strong penalty (e.g., blazer + joggers)
 }
@@ -162,6 +236,27 @@ function hasFormalityClash(items) {
 
     const range = Math.max(...formalityLevels) - Math.min(...formalityLevels);
     return range > 1;
+}
+
+function scoreAccessoryFormalityMatch(accessory, outfitItems) {
+    const accessoryFormality = FORMALITY_VALUES[accessory.formality];
+    if (!accessoryFormality) return 5; // Not tagged
+
+    const outfitFormalityLevels = outfitItems
+        .map(item => FORMALITY_VALUES[item.formality])
+        .filter(v => v !== undefined);
+
+    if (outfitFormalityLevels.length === 0) return 5;
+
+    // Find the outfit's dominant formality (most common level)
+    const avgFormality = Math.round(
+        outfitFormalityLevels.reduce((a, b) => a + b, 0) / outfitFormalityLevels.length
+    );
+
+    const gap = Math.abs(accessoryFormality - avgFormality);
+    if (gap === 0) return 10;  // Perfect match
+    if (gap === 1) return 7;   // Adjacent — acceptable
+    return 2;                   // Non-adjacent — clash
 }
 
 
@@ -187,11 +282,39 @@ const FIT_SCORES = {
  * Score the fit balance between top and bottom.
  * Returns a value between 0 and 10.
  */
-function scoreFitBalance(top, bottom) {
+function scoreFitBalance(top, bottom, preferences = {}) {
+    const scores = { ...FIT_SCORES };
+    const profile = preferences?.styleProfile;
+    
+    if (profile?.fitCombination === 'oversized-slim') {
+        scores['Oversized-Tight'] = 10;
+        scores['Oversized-Regular'] = 10;
+        scores['Oversized-Oversized'] = 6;
+    } else if (profile?.fitCombination === 'slim-wide') {
+        scores['Tight-Oversized'] = 9;
+        scores['Regular-Oversized'] = 10;
+    } else if (profile?.fitCombination === 'matched') {
+        scores['Regular-Regular'] = 10;
+        scores['Tight-Tight'] = 7;
+    }
+
     const topFit = top.fit || 'Regular';
     const bottomFit = bottom.fit || 'Regular';
     const key = `${topFit}-${bottomFit}`;
-    return FIT_SCORES[key] ?? 5;
+
+    let baseScore = scores[key] ?? 5;
+
+    if (preferences.preferBaggyFit) {
+        if (key === 'Oversized-Oversized') baseScore = Math.max(baseScore, 8);
+        if (key === 'Oversized-Regular') baseScore = Math.max(baseScore, 9);
+    }
+
+    if (preferences.preferFittedLook) {
+        if (key === 'Tight-Tight') baseScore = Math.max(baseScore, 8);
+        if (key === 'Tight-Regular') baseScore = Math.max(baseScore, 9);
+    }
+
+    return baseScore;
 }
 
 
@@ -218,11 +341,24 @@ const LENGTH_SCORES = {
  * Score the length proportion between top and bottom.
  * Returns a value between 0 and 10.
  */
-function scoreLengthProportion(top, bottom) {
+function scoreLengthProportion(top, bottom, preferences = {}) {
+    const scores = { ...LENGTH_SCORES };
+    const profile = preferences?.styleProfile;
+    
+    if (profile?.proportionPreference === 'cropped-long') {
+        scores['Cropped-Long'] = 10;
+        scores['Cropped-Regular'] = 9;
+    } else if (profile?.proportionPreference === 'long-slim') {
+        scores['Long-Regular'] = 8;
+        scores['Long-Long'] = 5;
+    } else if (profile?.proportionPreference === 'balanced') {
+        scores['Regular-Regular'] = 10;
+    }
+
     const topLength = top.length || 'Regular';
     const bottomLength = bottom.length || 'Regular';
     const key = `${topLength}-${bottomLength}`;
-    return LENGTH_SCORES[key] ?? 5;
+    return scores[key] ?? 5;
 }
 
 
@@ -351,14 +487,14 @@ const SCORE_WEIGHTS = {
 /**
  * Calculate the composite score for a full outfit combination (Top + Bottom).
  */
-function scoreOutfit(top, bottom, shoes, outerwear = null) {
+function scoreOutfit(top, bottom, shoes, outerwear = null, preferences = {}, outerwearMode = 'optional', recentGenerations = []) {
     const allItems = [top, bottom, shoes];
     if (outerwear) allItems.push(outerwear);
 
-    const colourScore = scoreColourHarmony(allItems);
-    const formalityScore = scoreFormalityMatch(allItems);
-    const fitScore = scoreFitBalance(top, bottom);
-    const lengthScore = scoreLengthProportion(top, bottom);
+    const colourScore = scoreColourHarmony(allItems, preferences);
+    const formalityScore = scoreFormalityMatch(allItems, preferences);
+    const fitScore = scoreFitBalance(top, bottom, preferences);
+    const lengthScore = scoreLengthProportion(top, bottom, preferences);
 
     let composite = (
         colourScore * SCORE_WEIGHTS.colour +
@@ -366,6 +502,10 @@ function scoreOutfit(top, bottom, shoes, outerwear = null) {
         fitScore * SCORE_WEIGHTS.fit +
         lengthScore * SCORE_WEIGHTS.length
     );
+
+    if (preferences.preferLayering && outerwear && outerwearMode === 'optional') {
+        composite += 1.0;
+    }
 
     if (outerwear) {
         const outerwearScore = scoreOuterwearCompatibility(outerwear, top, bottom);
@@ -376,6 +516,16 @@ function scoreOutfit(top, bottom, shoes, outerwear = null) {
     const imageCount = allItems.filter(item => item?.imageUri).length;
     composite += imageCount * 0.2;
 
+    // Apply accumulated user feedback adjustments
+    const totalAdjustment = allItems.reduce((sum, item) => sum + (item?.scoreAdjustment || 0), 0);
+    composite += totalAdjustment;
+
+    // Apply recency penalty (-1.0) if this exact top-bottom combo was recently generated
+    const signature = `${top.id}_${bottom.id}`;
+    if (recentGenerations.includes(signature)) {
+        composite -= 1.0;
+    }
+
     return Math.max(0, composite);
 }
 
@@ -383,18 +533,26 @@ function scoreOutfit(top, bottom, shoes, outerwear = null) {
  * Calculate the composite score for a Full Body outfit combination.
  * Skips fit balance and length proportion for the top/bottom interaction.
  */
-function scoreFullBodyOutfit(fullBody, shoes, outerwear = null) {
+function scoreFullBodyOutfit(fullBody, shoes, outerwear = null, preferences = {}, outerwearMode = 'optional', recentGenerations = []) {
     const allItems = [fullBody, shoes];
     if (outerwear) allItems.push(outerwear);
 
-    const colourScore = scoreColourHarmony(allItems);
-    const formalityScore = scoreFormalityMatch(allItems);
+    const colourScore = scoreColourHarmony(allItems, preferences);
+    const formalityScore = scoreFormalityMatch(allItems, preferences);
 
     // Distribute weights over colour and formality only (e.g. Colour 50%, Formality 50%)
     let composite = (
         colourScore * 0.50 +
         formalityScore * 0.50
     );
+
+    if (preferences.preferDresses) {
+        composite += 1.5;
+    }
+
+    if (preferences.preferLayering && outerwear && outerwearMode === 'optional') {
+        composite += 1.0;
+    }
 
     if (outerwear) {
         // Evaluate outerwear fit mostly against the fullBody piece
@@ -405,6 +563,16 @@ function scoreFullBodyOutfit(fullBody, shoes, outerwear = null) {
     composite += Math.random() * 0.5;
     const imageCount = allItems.filter(item => item?.imageUri).length;
     composite += imageCount * 0.2;
+
+    // Apply accumulated user feedback adjustments
+    const totalAdjustment = allItems.reduce((sum, item) => sum + (item?.scoreAdjustment || 0), 0);
+    composite += totalAdjustment;
+
+    // Apply recency penalty (-1.0) if this full body item was recently generated
+    const signature = fullBody.id;
+    if (recentGenerations.includes(signature)) {
+        composite -= 1.0;
+    }
 
     return Math.max(0, composite);
 }
@@ -427,7 +595,7 @@ const ACTIVITY_FORMALITY_MAP = {
  * @param {string|null} activity - The selected activity for pre-filtering (optional)
  * @returns {{ outfits: Array, error: string|null }}
  */
-export function generateOutfits(wardrobeItems, temperature = null, count = 3, activity = null) {
+export function generateOutfits(wardrobeItems, temperature = null, count = 3, activity = null, preferences = {}, recentGenerations = []) {
     // Activity Pre-filter
     let activeWardrobe = wardrobeItems;
     if (activity && ACTIVITY_FORMALITY_MAP[activity]) {
@@ -480,17 +648,17 @@ export function generateOutfits(wardrobeItems, temperature = null, count = 3, ac
                     if (hasFormalityClash([top, bottom, shoe])) continue;
 
                     if (outerwearMode === 'excluded' || outerwear.length === 0) {
-                        candidates.push({ top, bottom, shoes: shoe, outerwear: null, fullBody: null, score: scoreOutfit(top, bottom, shoe, null), generatedAt: new Date() });
+                        candidates.push({ top, bottom, shoes: shoe, outerwear: null, fullBody: null, score: scoreOutfit(top, bottom, shoe, null, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                     } else if (outerwearMode === 'required') {
                         for (const outer of outerwear) {
                             if (hasFormalityClash([top, bottom, shoe, outer])) continue;
-                            candidates.push({ top, bottom, shoes: shoe, outerwear: outer, fullBody: null, score: scoreOutfit(top, bottom, shoe, outer), generatedAt: new Date() });
+                            candidates.push({ top, bottom, shoes: shoe, outerwear: outer, fullBody: null, score: scoreOutfit(top, bottom, shoe, outer, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                         }
                     } else {
-                        candidates.push({ top, bottom, shoes: shoe, outerwear: null, fullBody: null, score: scoreOutfit(top, bottom, shoe, null), generatedAt: new Date() });
+                        candidates.push({ top, bottom, shoes: shoe, outerwear: null, fullBody: null, score: scoreOutfit(top, bottom, shoe, null, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                         for (const outer of outerwear) {
                             if (hasFormalityClash([top, bottom, shoe, outer])) continue;
-                            candidates.push({ top, bottom, shoes: shoe, outerwear: outer, fullBody: null, score: scoreOutfit(top, bottom, shoe, outer), generatedAt: new Date() });
+                            candidates.push({ top, bottom, shoes: shoe, outerwear: outer, fullBody: null, score: scoreOutfit(top, bottom, shoe, outer, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                         }
                     }
                 }
@@ -505,17 +673,17 @@ export function generateOutfits(wardrobeItems, temperature = null, count = 3, ac
                 if (hasFormalityClash([fb, shoe])) continue;
 
                 if (outerwearMode === 'excluded' || outerwear.length === 0) {
-                    candidates.push({ top: null, bottom: null, fullBody: fb, shoes: shoe, outerwear: null, score: scoreFullBodyOutfit(fb, shoe, null), generatedAt: new Date() });
+                    candidates.push({ top: null, bottom: null, fullBody: fb, shoes: shoe, outerwear: null, score: scoreFullBodyOutfit(fb, shoe, null, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                 } else if (outerwearMode === 'required') {
                     for (const outer of outerwear) {
                         if (hasFormalityClash([fb, shoe, outer])) continue;
-                        candidates.push({ top: null, bottom: null, fullBody: fb, shoes: shoe, outerwear: outer, score: scoreFullBodyOutfit(fb, shoe, outer), generatedAt: new Date() });
+                        candidates.push({ top: null, bottom: null, fullBody: fb, shoes: shoe, outerwear: outer, score: scoreFullBodyOutfit(fb, shoe, outer, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                     }
                 } else {
-                    candidates.push({ top: null, bottom: null, fullBody: fb, shoes: shoe, outerwear: null, score: scoreFullBodyOutfit(fb, shoe, null), generatedAt: new Date() });
+                    candidates.push({ top: null, bottom: null, fullBody: fb, shoes: shoe, outerwear: null, score: scoreFullBodyOutfit(fb, shoe, null, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                     for (const outer of outerwear) {
                         if (hasFormalityClash([fb, shoe, outer])) continue;
-                        candidates.push({ top: null, bottom: null, fullBody: fb, shoes: shoe, outerwear: outer, score: scoreFullBodyOutfit(fb, shoe, outer), generatedAt: new Date() });
+                        candidates.push({ top: null, bottom: null, fullBody: fb, shoes: shoe, outerwear: outer, score: scoreFullBodyOutfit(fb, shoe, outer, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                     }
                 }
             }
@@ -528,15 +696,15 @@ export function generateOutfits(wardrobeItems, temperature = null, count = 3, ac
             for (const bottom of bottoms) {
                 for (const shoe of shoes) {
                     if (outerwearMode === 'excluded' || outerwear.length === 0) {
-                        candidates.push({ top, bottom, shoes: shoe, outerwear: null, fullBody: null, score: scoreOutfit(top, bottom, shoe, null), generatedAt: new Date() });
+                        candidates.push({ top, bottom, shoes: shoe, outerwear: null, fullBody: null, score: scoreOutfit(top, bottom, shoe, null, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                     } else if (outerwearMode === 'required') {
                         for (const outer of outerwear) {
-                            candidates.push({ top, bottom, shoes: shoe, outerwear: outer, fullBody: null, score: scoreOutfit(top, bottom, shoe, outer), generatedAt: new Date() });
+                            candidates.push({ top, bottom, shoes: shoe, outerwear: outer, fullBody: null, score: scoreOutfit(top, bottom, shoe, outer, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                         }
                     } else {
-                        candidates.push({ top, bottom, shoes: shoe, outerwear: null, fullBody: null, score: scoreOutfit(top, bottom, shoe, null), generatedAt: new Date() });
+                        candidates.push({ top, bottom, shoes: shoe, outerwear: null, fullBody: null, score: scoreOutfit(top, bottom, shoe, null, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                         for (const outer of outerwear) {
-                            candidates.push({ top, bottom, shoes: shoe, outerwear: outer, fullBody: null, score: scoreOutfit(top, bottom, shoe, outer), generatedAt: new Date() });
+                            candidates.push({ top, bottom, shoes: shoe, outerwear: outer, fullBody: null, score: scoreOutfit(top, bottom, shoe, outer, preferences, outerwearMode, recentGenerations), generatedAt: new Date() });
                         }
                     }
                 }
@@ -573,7 +741,53 @@ export function generateOutfits(wardrobeItems, temperature = null, count = 3, ac
         }
     }
 
+    for (const outfit of selected) {
+        outfit.accessories = selectAccessories(wardrobeItems, outfit, temperature, 2);
+    }
+
     return { outfits: selected, error: null };
+}
+
+export function selectAccessories(wardrobeItems, outfit, temperature = null, count = 2) {
+    // Get all accessory items
+    let accessories = wardrobeItems.filter(item => item.category === 'Accessory');
+
+    if (accessories.length === 0) return [];
+
+    // Weather filter — exclude cold accessories in hot weather and vice versa
+    accessories = filterByWeather(accessories, temperature);
+
+    // Get the outfit's clothing items as an array
+    const outfitItems = [outfit.top, outfit.bottom, outfit.shoes].filter(Boolean);
+    if (outfit.outerwear) outfitItems.push(outfit.outerwear);
+    if (outfit.fullBody) outfitItems.push(outfit.fullBody);
+
+    // Score each accessory
+    const scored = accessories.map(acc => {
+        const colourScore = scoreAccessoryColourMatch(acc, outfitItems);
+        const formalityScore = scoreAccessoryFormalityMatch(acc, outfitItems);
+        // Weight: 60% colour, 40% formality (colour is more visually impactful for accessories)
+        const totalScore = (colourScore * 0.6) + (formalityScore * 0.4);
+        return { accessory: acc, score: totalScore };
+    });
+
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score);
+
+    // Select top accessories ensuring category diversity (no two hats, no two bags)
+    const selectedAccessories = [];
+    const usedTypes = new Set();
+
+    for (const item of scored) {
+        const type = item.accessory.accessoryType;
+        if (type && usedTypes.has(type)) continue; // Skip duplicate sub-categories
+        if (item.score < 4) continue; // Skip poorly matching accessories
+        usedTypes.add(type);
+        selectedAccessories.push(item);
+        if (selectedAccessories.length >= count) break;
+    }
+
+    return selectedAccessories.map(s => ({ ...s.accessory, matchScore: s.score }));
 }
 
 
@@ -603,4 +817,26 @@ export function getAlternatives(wardrobeItems, category, currentItemId, temperat
 
     items = filterByWeather(items, temperature);
     return items;
+}
+
+export function getAccessoryAlternatives(wardrobeItems, currentOutfit, currentAccessory, temperature = null) {
+    let accessories = wardrobeItems.filter(item => item.category === 'Accessory' && item.id !== currentAccessory?.id);
+    accessories = filterByWeather(accessories, temperature);
+
+    // Filter diversity
+    const otherAccessories = (currentOutfit.accessories || []).filter(a => a.id !== currentAccessory?.id);
+    const usedTypes = new Set(otherAccessories.map(a => a.accessoryType).filter(Boolean));
+    accessories = accessories.filter(a => !usedTypes.has(a.accessoryType));
+
+    const outfitItems = [currentOutfit.top, currentOutfit.bottom, currentOutfit.shoes, currentOutfit.outerwear, currentOutfit.fullBody].filter(Boolean);
+
+    const scored = accessories.map(acc => {
+        const colourScore = scoreAccessoryColourMatch(acc, outfitItems);
+        const formalityScore = scoreAccessoryFormalityMatch(acc, outfitItems);
+        const totalScore = (colourScore * 0.6) + (formalityScore * 0.4);
+        return { accessory: acc, score: totalScore };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map(s => s.accessory);
 }

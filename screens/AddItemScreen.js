@@ -1,7 +1,9 @@
-import React, { useState, useContext } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, SafeAreaView, Image, ScrollView } from 'react-native';
+import React, { useState, useContext, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, SafeAreaView, Image, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { WardrobeContext } from '../context/WardrobeContext';
 import * as ImagePicker from 'expo-image-picker';
+import { classifyItem } from '../services/classifyItem';
+import { removeBackground } from '../services/removeBackground';
 
 // Colour palette with display hex values for the circle selectors
 const COLOUR_OPTIONS = [
@@ -25,29 +27,118 @@ const COLOUR_OPTIONS = [
     { name: 'Maroon', hex: '#800000' },
 ];
 
-export default function AddItemScreen({ navigation }) {
-    const { addItem } = useContext(WardrobeContext);
+export default function AddItemScreen({ navigation, route }) {
+    const { addItem, addMultipleItems, updateItem, deleteItem } = useContext(WardrobeContext);
+    const editingItem = route?.params?.item;
 
-    const [name, setName] = useState('');
-    const [category, setCategory] = useState('Top');
-    const [fit, setFit] = useState('Regular');
-    const [colour, setColour] = useState(null);
-    const [formality, setFormality] = useState('Everyday');
-    const [warmth, setWarmth] = useState('Transitional');
-    const [length, setLength] = useState('Regular');
-    const [imageUri, setImageUri] = useState(null);
+    const [name, setName] = useState(editingItem?.name || '');
+    const [category, setCategory] = useState(editingItem?.category || 'Top');
+    const [accessoryType, setAccessoryType] = useState(editingItem?.accessoryType || 'Hat / Cap');
+    const [fit, setFit] = useState(editingItem?.fit || 'Regular');
+    const [colour, setColour] = useState(editingItem?.colour || null);
+    const [formality, setFormality] = useState(editingItem?.formality || 'Everyday');
+    const [warmth, setWarmth] = useState(editingItem?.warmth || 'Transitional');
+    const [length, setLength] = useState(editingItem?.length || 'Regular');
+    const [imageUri, setImageUri] = useState(editingItem?.imageUri || null);
+    const [localImage, setLocalImage] = useState(editingItem?.image || null);
     const [status, requestPermission] = ImagePicker.useCameraPermissions();
+    const [isClassifying, setIsClassifying] = useState(false);
+    const [isRemovingBackground, setIsRemovingBackground] = useState(false);
+    const [batchQueue, setBatchQueue] = useState([]);
+    const [approvedItems, setApprovedItems] = useState([]);
+    const [originalBatchSize, setOriginalBatchSize] = useState(0);
+    const [autoFilledFields, setAutoFilledFields] = useState([]);
+
+    const VALID_OPTIONS = {
+        category: ['Top', 'Bottom', 'Outerwear', 'Full Body', 'Shoes', 'Accessory'],
+        colour: COLOUR_OPTIONS.map(c => c.name),
+        fit: ['Tight', 'Regular', 'Oversized'],
+        formality: ['Casual', 'Everyday', 'Smart', 'Athletic'],
+        warmth: ['Warm', 'Transitional', 'Cold'],
+        length: ['Cropped', 'Regular', 'Long'],
+        accessoryType: ['Hat / Cap', 'Bag / Backpack', 'Watch / Jewellery', 'Belt', 'Scarf', 'Sunglasses']
+    };
+
+    const handleClassification = async (uri) => {
+        setIsClassifying(true);
+        setAutoFilledFields([]);
+        const result = await classifyItem(uri);
+        setIsClassifying(false);
+
+        if (!result || result.error) {
+            Alert.alert("Auto-Detect Failed", "Detection failed. Please enter information manually.");
+            return;
+        }
+
+        const filled = [];
+
+        if (result.name && typeof result.name === 'string') {
+            setName(result.name);
+            filled.push('name');
+        }
+        if (VALID_OPTIONS.category.includes(result.category)) {
+            setCategory(result.category);
+            filled.push('category');
+        }
+        if (result.category === 'Accessory' && VALID_OPTIONS.accessoryType.includes(result.accessoryType)) {
+            setAccessoryType(result.accessoryType);
+            filled.push('accessoryType');
+        }
+        if (VALID_OPTIONS.colour.includes(result.colour)) {
+            setColour(result.colour);
+            filled.push('colour');
+        }
+        if (VALID_OPTIONS.fit.includes(result.fit)) {
+            setFit(result.fit);
+            filled.push('fit');
+        }
+        if (VALID_OPTIONS.formality.includes(result.formality)) {
+            setFormality(result.formality);
+            filled.push('formality');
+        }
+        if (VALID_OPTIONS.warmth.includes(result.warmth)) {
+            setWarmth(result.warmth);
+            filled.push('warmth');
+        }
+        if (VALID_OPTIONS.length.includes(result.length)) {
+            setLength(result.length);
+            filled.push('length');
+        }
+
+        setAutoFilledFields(filled);
+
+        // Remove highlights after 2 seconds
+        if (filled.length > 0) {
+            setTimeout(() => {
+                setAutoFilledFields([]);
+            }, 2000);
+        }
+    };
 
     const pickImage = async () => {
         let result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [4, 3],
-            quality: 1,
+            allowsMultipleSelection: true,
+            quality: 0.5,
         });
 
         if (!result.canceled) {
-            setImageUri(result.assets[0].uri);
+            if (result.assets.length > 1) {
+                const uris = result.assets.map(a => a.uri);
+                setOriginalBatchSize(uris.length);
+                setBatchQueue(uris);
+                setApprovedItems([]);
+                
+                // Immediately kick off the first item
+                setImageUri(uris[0]);
+                setLocalImage(null);
+                handleClassification(uris[0]);
+            } else {
+                const uri = result.assets[0].uri;
+                setImageUri(uri);
+                setLocalImage(null);
+                handleClassification(uri);
+            }
         }
     };
 
@@ -60,31 +151,104 @@ export default function AddItemScreen({ navigation }) {
         let result = await ImagePicker.launchCameraAsync({
             allowsEditing: true,
             aspect: [4, 3],
-            quality: 1,
+            quality: 0.5,
         });
 
         if (!result.canceled) {
-            setImageUri(result.assets[0].uri);
+            const uri = result.assets[0].uri;
+            setImageUri(uri);
+            setLocalImage(null);
+            handleClassification(uri);
+        }
+    };
+
+    const handleRemoveBackground = async () => {
+        let uriToProcess = imageUri;
+        if (!uriToProcess && typeof localImage === 'string') uriToProcess = localImage;
+        if (!uriToProcess && localImage?.uri) uriToProcess = localImage.uri;
+
+        if (!uriToProcess) {
+            Alert.alert("Cannot Process Image", "Please take a new photo or select one from the gallery first.");
+            return;
+        }
+
+        setIsRemovingBackground(true);
+        const result = await removeBackground(uriToProcess);
+        setIsRemovingBackground(false);
+
+        if (result && !result.error) {
+            setImageUri(result);
+            setLocalImage(null);
+        } else {
+            Alert.alert("Background Removal Failed", result?.error || "Could not remove background. Check your API key or internet connection.");
         }
     };
 
     const handleSave = () => {
-        addItem({
+        const itemData = {
             name: name || 'Untitled Item',
             category,
-            fit,
+            accessoryType: category === 'Accessory' ? accessoryType : null,
+            fit: category === 'Accessory' ? null : fit,
             colour,
             formality,
             warmth,
-            length,
+            length: category === 'Accessory' ? null : length,
             imageUri,
-        });
-        navigation.goBack();
+        };
+
+        if (batchQueue.length > 0) {
+            // We are processing a batch queue
+            const newApproved = [...approvedItems, itemData];
+            setApprovedItems(newApproved);
+
+            const remainingQueue = batchQueue.slice(1);
+            setBatchQueue(remainingQueue);
+
+            if (remainingQueue.length > 0) {
+                // Load the next item in the queue
+                const nextUri = remainingQueue[0];
+                setImageUri(nextUri);
+                setLocalImage(null);
+                setName(''); // Clear previous residual name
+                handleClassification(nextUri);
+            } else {
+                // Batch is totally finished
+                addMultipleItems(newApproved);
+                Alert.alert(
+                    "Batch Complete",
+                    `Successfully added ${newApproved.length} items back to your wardrobe!`,
+                    [{ text: "OK", onPress: () => navigation.goBack() }]
+                );
+            }
+        } else {
+            // Standard single item save logic
+            if (editingItem) {
+                updateItem(editingItem.id, itemData);
+            } else {
+                addItem(itemData);
+            }
+            navigation.goBack();
+        }
+    };
+
+    const confirmDelete = () => {
+        Alert.alert(
+            "Delete Item",
+            "Are you sure you want to remove this item from your wardrobe?",
+            [
+                { text: "Cancel", style: "cancel" },
+                { text: "Delete", style: "destructive", onPress: () => {
+                    deleteItem(editingItem.id);
+                    navigation.goBack();
+                }}
+            ]
+        );
     };
 
     // Reusable pill-button selector (same pattern as before)
-    const SelectionGroup = ({ label, options, selected, onSelect }) => (
-        <View style={styles.inputGroup}>
+    const SelectionGroup = ({ label, options, selected, onSelect, fieldKey }) => (
+        <View style={[styles.inputGroup, autoFilledFields.includes(fieldKey) && styles.highlightedGroup]}>
             <Text style={styles.label}>{label}</Text>
             <View style={styles.selectionContainer}>
                 {options.map((option) => (
@@ -108,7 +272,7 @@ export default function AddItemScreen({ navigation }) {
 
     // Colour selector using coloured circles
     const ColourSelector = () => (
-        <View style={styles.inputGroup}>
+        <View style={[styles.inputGroup, autoFilledFields.includes('colour') && styles.highlightedGroup]}>
             <Text style={styles.label}>Colour</Text>
             <View style={styles.colourGrid}>
                 {COLOUR_OPTIONS.map((c) => (
@@ -144,7 +308,15 @@ export default function AddItemScreen({ navigation }) {
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
-                <Text style={styles.title}>Add New Item</Text>
+                <Text style={styles.title}>{editingItem ? 'Edit Item' : 'Add New Item'}</Text>
+
+                {/* Loading Overlay */}
+                {isClassifying && (
+                    <View style={styles.loadingOverlay}>
+                        <ActivityIndicator size="large" color="#1a1a1a" />
+                        <Text style={styles.loadingText}>Detecting item details...</Text>
+                    </View>
+                )}
 
                 {/* Image Upload */}
                 <View style={styles.inputGroup}>
@@ -153,6 +325,8 @@ export default function AddItemScreen({ navigation }) {
                         <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
                             {imageUri ? (
                                 <Image source={{ uri: imageUri }} style={styles.image} />
+                            ) : localImage ? (
+                                <Image source={localImage} style={styles.image} />
                             ) : (
                                 <Text style={styles.imagePlaceholderText}>Choose from Gallery</Text>
                             )}
@@ -162,10 +336,24 @@ export default function AddItemScreen({ navigation }) {
                             <Text style={styles.imagePlaceholderText}>📸 Take Photo</Text>
                         </TouchableOpacity>
                     </View>
+
+                    {(imageUri || localImage) && (
+                        <TouchableOpacity 
+                            style={styles.rmBgButton} 
+                            onPress={handleRemoveBackground}
+                            disabled={isRemovingBackground}
+                        >
+                            {isRemovingBackground ? (
+                                <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                                <Text style={styles.rmBgText}>✨ Remove Background</Text>
+                            )}
+                        </TouchableOpacity>
+                    )}
                 </View>
 
                 {/* Item Name */}
-                <View style={styles.inputGroup}>
+                <View style={[styles.inputGroup, autoFilledFields.includes('name') && styles.highlightedGroup]}>
                     <Text style={styles.label}>Item Name</Text>
                     <TextInput
                         style={styles.textInput}
@@ -176,24 +364,39 @@ export default function AddItemScreen({ navigation }) {
                     />
                 </View>
 
-                {/* Category — now includes Outerwear & Full Body */}
+                {/* Category */}
                 <SelectionGroup
                     label="Category"
-                    options={['Top', 'Bottom', 'Outerwear', 'Full Body', 'Shoes']}
+                    options={VALID_OPTIONS.category}
                     selected={category}
                     onSelect={setCategory}
+                    fieldKey="category"
                 />
+
+                {/* Sub-category if Accessory */}
+                {category === 'Accessory' && (
+                    <SelectionGroup
+                        label="Accessory Type"
+                        options={VALID_OPTIONS.accessoryType}
+                        selected={accessoryType}
+                        onSelect={setAccessoryType}
+                        fieldKey="accessoryType"
+                    />
+                )}
 
                 {/* Colour */}
                 <ColourSelector />
 
                 {/* Fit */}
-                <SelectionGroup
-                    label="Fit"
-                    options={['Tight', 'Regular', 'Oversized']}
-                    selected={fit}
-                    onSelect={setFit}
-                />
+                {category !== 'Accessory' && (
+                    <SelectionGroup
+                        label="Fit"
+                        options={['Tight', 'Regular', 'Oversized']}
+                        selected={fit}
+                        onSelect={setFit}
+                        fieldKey="fit"
+                    />
+                )}
 
                 {/* Formality */}
                 <SelectionGroup
@@ -201,6 +404,7 @@ export default function AddItemScreen({ navigation }) {
                     options={['Casual', 'Everyday', 'Smart', 'Athletic']}
                     selected={formality}
                     onSelect={setFormality}
+                    fieldKey="formality"
                 />
 
                 {/* Warmth */}
@@ -209,20 +413,39 @@ export default function AddItemScreen({ navigation }) {
                     options={['Warm', 'Transitional', 'Cold']}
                     selected={warmth}
                     onSelect={setWarmth}
+                    fieldKey="warmth"
                 />
 
                 {/* Length */}
-                <SelectionGroup
-                    label="Length"
-                    options={['Cropped', 'Regular', 'Long']}
-                    selected={length}
-                    onSelect={setLength}
-                />
+                {category !== 'Accessory' && (
+                    <SelectionGroup
+                        label="Length"
+                        options={['Cropped', 'Regular', 'Long']}
+                        selected={length}
+                        onSelect={setLength}
+                        fieldKey="length"
+                    />
+                )}
 
                 {/* Save Button */}
                 <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-                    <Text style={styles.saveText}>Save to Wardrobe</Text>
+                    <Text style={styles.saveText}>
+                        {batchQueue.length > 1 
+                            ? `Save & Next Item (${originalBatchSize - batchQueue.length + 1} of ${originalBatchSize})`
+                            : batchQueue.length === 1 
+                                ? 'Save Final Item & Finish Batch'
+                                : editingItem 
+                                    ? 'Update Item' 
+                                    : 'Save to Wardrobe'
+                        }
+                    </Text>
                 </TouchableOpacity>
+
+                {editingItem && (
+                    <TouchableOpacity style={styles.deleteButton} onPress={confirmDelete}>
+                        <Text style={styles.deleteText}>Delete Item</Text>
+                    </TouchableOpacity>
+                )}
 
                 {/* Bottom spacing so save button isn't flush against edge */}
                 <View style={{ height: 40 }} />
@@ -251,6 +474,12 @@ const styles = StyleSheet.create({
     },
     inputGroup: {
         marginBottom: 24,
+        padding: 8,
+        borderRadius: 12,
+        backgroundColor: 'transparent',
+    },
+    highlightedGroup: {
+        backgroundColor: '#e6ffe6', // Light green flash
     },
     label: {
         fontSize: 14,
@@ -268,6 +497,22 @@ const styles = StyleSheet.create({
         color: '#333',
         borderWidth: 1,
         borderColor: '#eee',
+    },
+    loadingOverlay: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f0f4ff',
+        padding: 16,
+        borderRadius: 12,
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: '#d0ddff',
+    },
+    loadingText: {
+        marginLeft: 12,
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#1B2A4A',
     },
     imageButtonsContainer: {
         flexDirection: 'row',
@@ -297,6 +542,18 @@ const styles = StyleSheet.create({
         color: '#999',
         fontSize: 12,
         fontWeight: '600',
+    },
+    rmBgButton: {
+        marginTop: 14,
+        backgroundColor: '#8a2be2',
+        paddingVertical: 14,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    rmBgText: {
+        color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 14,
     },
     selectionContainer: {
         flexDirection: 'row',
@@ -375,6 +632,20 @@ const styles = StyleSheet.create({
     },
     saveText: {
         color: '#fff',
+        fontWeight: 'bold',
+        fontSize: 16,
+    },
+    deleteButton: {
+        marginTop: 16,
+        padding: 18,
+        backgroundColor: '#ffebee',
+        borderRadius: 16,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#ffcdd2',
+    },
+    deleteText: {
+        color: '#d32f2f',
         fontWeight: 'bold',
         fontSize: 16,
     },

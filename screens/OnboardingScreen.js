@@ -1,5 +1,5 @@
 import React, { useContext, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, Alert } from 'react-native';
 import { WardrobeContext } from '../context/WardrobeContext';
 import SAMPLE_WARDROBE_MALE from '../data/sampleWardrobeMale';
 import SAMPLE_WARDROBE_FEMALE from '../data/sampleWardrobeFemale';
@@ -8,22 +8,44 @@ export default function OnboardingScreen({ navigation }) {
     const { addMultipleItems, setOnboardingComplete } = useContext(WardrobeContext);
     const [wardrobeChoice, setWardrobeChoice] = useState(null); // 'Sample' or null
 
-    const handleSampleWardrobe = async (gender) => {
-        let wardrobe = [];
-        if (gender === 'Male') {
-            wardrobe = SAMPLE_WARDROBE_MALE;
-        } else if (gender === 'Female') {
-            wardrobe = SAMPLE_WARDROBE_FEMALE;
-        } else {
-            wardrobe = [...SAMPLE_WARDROBE_MALE, ...SAMPLE_WARDROBE_FEMALE];
+    const handleGenderSelection = async (gender) => {
+        if (wardrobeChoice === 'Sample') {
+            let wardrobe = [];
+            if (gender === 'Male') {
+                wardrobe = SAMPLE_WARDROBE_MALE;
+            } else if (gender === 'Female') {
+                wardrobe = SAMPLE_WARDROBE_FEMALE;
+            } else {
+                wardrobe = [...SAMPLE_WARDROBE_MALE, ...SAMPLE_WARDROBE_FEMALE];
+            }
+            await addMultipleItems(wardrobe);
         }
-
-        await addMultipleItems(wardrobe);
-        await setOnboardingComplete(true, gender);
+        
+        // If fluid, default to Female for the style quiz as per data availability
+        const quizGender = gender === 'Male' ? 'Male' : 'Female';
+        navigation.navigate('StyleProfile', { gender: quizGender });
     };
 
-    const handleEmptyWardrobe = async () => {
-        await setOnboardingComplete(true, null);
+    const handleEmptyWardrobe = () => {
+        Alert.alert(
+            "Quick Style Survey",
+            "Would you like to take a 1-minute style survey to help us personalise your experience?",
+            [
+                {
+                    text: "Skip",
+                    style: "cancel",
+                    onPress: async () => {
+                        await setOnboardingComplete(true, null);
+                    }
+                },
+                {
+                    text: "Yes, let's go!",
+                    onPress: () => {
+                        setWardrobeChoice('Empty');
+                    }
+                }
+            ]
+        );
     };
 
     return (
@@ -47,9 +69,6 @@ export default function OnboardingScreen({ navigation }) {
                             onPress={() => setWardrobeChoice('Sample')}
                             activeOpacity={0.8}
                         >
-                            <View style={styles.cardDarkBadge}>
-                                <Text style={styles.cardDarkBadgeText}>Recommended</Text>
-                            </View>
                             <View style={styles.iconWrapDark}>
                                 <Text style={styles.icon}>✨</Text>
                             </View>
@@ -76,20 +95,20 @@ export default function OnboardingScreen({ navigation }) {
                     </View>
                 ) : (
                     <View style={styles.optionsContainer}>
-                        <TouchableOpacity style={styles.cardLight} onPress={() => handleSampleWardrobe('Male')} activeOpacity={0.8}>
+                        <TouchableOpacity style={styles.cardLight} onPress={() => handleGenderSelection('Male')} activeOpacity={0.8}>
                             <View style={styles.iconWrapLight}><Text style={styles.icon}>👨</Text></View>
                             <Text style={styles.cardLightTitle}>Menswear</Text>
-                            <Text style={styles.cardLightDesc}>Explore male sample clothing styles.</Text>
+                            <Text style={styles.cardLightDesc}>Explore male clothing styles.</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.cardLight} onPress={() => handleSampleWardrobe('Female')} activeOpacity={0.8}>
+                        <TouchableOpacity style={styles.cardLight} onPress={() => handleGenderSelection('Female')} activeOpacity={0.8}>
                             <View style={styles.iconWrapLight}><Text style={styles.icon}>👩</Text></View>
                             <Text style={styles.cardLightTitle}>Womenswear</Text>
-                            <Text style={styles.cardLightDesc}>Explore female sample clothing styles.</Text>
+                            <Text style={styles.cardLightDesc}>Explore female clothing styles.</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.cardLight} onPress={() => handleSampleWardrobe('Fluid')} activeOpacity={0.8}>
+                        <TouchableOpacity style={styles.cardLight} onPress={() => handleGenderSelection('Fluid')} activeOpacity={0.8}>
                             <View style={styles.iconWrapLight}><Text style={styles.icon}>✨</Text></View>
                             <Text style={styles.cardLightTitle}>Gender Fluid</Text>
-                            <Text style={styles.cardLightDesc}>Explore all sample clothing styles combined.</Text>
+                            <Text style={styles.cardLightDesc}>Explore all clothing styles combined.</Text>
                         </TouchableOpacity>
                     </View>
                 )}

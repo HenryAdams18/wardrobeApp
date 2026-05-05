@@ -9,6 +9,8 @@ import SavedOutfitsScreen from './screens/SavedOutfitsScreen';
 import OutfitResultsScreen from './screens/OutfitResultsScreen';
 import AddItemScreen from './screens/AddItemScreen';
 import OnboardingScreen from './screens/OnboardingScreen';
+import StyleProfileScreen from './screens/StyleProfileScreen';
+import PreferencesScreen from './screens/PreferencesScreen';
 
 import { WardrobeProvider, WardrobeContext } from './context/WardrobeContext';
 
@@ -21,6 +23,7 @@ function TabNavigator() {
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Wardrobe" component={WardrobeScreen} />
       <Tab.Screen name="Saved" component={SavedOutfitsScreen} />
+      <Tab.Screen name="Profile" component={PreferencesScreen} />
     </Tab.Navigator>
   );
 }
@@ -48,13 +51,25 @@ function AppNavigator() {
               component={OutfitResultsScreen}
               options={{ presentation: 'modal', title: 'Generated Outfit' }}
             />
+            <Stack.Screen
+              name="StyleProfile"
+              component={StyleProfileScreen}
+              options={{ headerShown: false }}
+            />
           </>
         ) : (
-          <Stack.Screen
-            name="Onboarding"
-            component={OnboardingScreen}
-            options={{ headerShown: false }}
-          />
+          <>
+            <Stack.Screen
+              name="Onboarding"
+              component={OnboardingScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="StyleProfile"
+              component={StyleProfileScreen}
+              options={{ headerShown: false }}
+            />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>
